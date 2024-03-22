@@ -1,9 +1,9 @@
-# IoT RC Car
+# IoT RC Car - The ByteBuggy
 
 <!-- TABLE OF CONTENTS -->
 ## Table of Contents
 
-- [IoT RC Car](#iot-rc-car)
+- [IoT RC Car - The ByteBuggy](#iot-rc-car---the-bytebuggy)
   - [Table of Contents](#table-of-contents)
   - [About](#about)
   - [Setup](#setup)

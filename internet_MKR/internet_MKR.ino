@@ -6,14 +6,15 @@
 #include <ArduinoMqttClient.h>
 #include <WiFiNINA.h>
 #include <ArduinoJson.h>
-
 #include "arduino_secrets.h" 
+
 /////// Please enter your sensitive data in the Secret tab/arduino_secrets.h
 const char ssid[]       = SECRET_SSID;    // your network SSID (name)
 const char pass[]       = SECRET_PASS;    // your network password (use for WPA, or use as key for WEP)
 const char broker[]     = SECRET_BROKER;
 const char* certificate = SECRET_CERTIFICATE;
 
+// Internet
 int status = WL_IDLE_STATUS;
 
 WiFiServer server(80);
@@ -26,67 +27,54 @@ const char *webpage =
 #include "controlPage.h"
 ;
 
-//const int capacity = JSON_OBJECT_SIZE(2);
-//StaticJsonDocument<capacity> doc;
 JsonDocument doc;
 char jsonOutput[128];
 
+// Interval for "ping" to cloud
+unsigned long previousMillis = 0; 
+const long interval = 10000;
+
 void setup() {  
   Serial.begin(115200);
-  //while (!Serial);
 
-  if (!ECCX08.begin()) {
-    Serial.println("No ECCX08 present!");
-    while (1);
-  }
-
-  // Set a callback to get the current time
-  // used to validate the servers certificate
-  ArduinoBearSSL.onGetTime(getTime);
-
-  // Set the ECCX08 slot to use for the private key
-  // and the accompanying public certificate for it
-  sslClient.setEccSlot(0, certificate);
+  initSSL();
   
-  pinMode(SS, OUTPUT); 
-  digitalWrite(SS, HIGH);
+  initSPI();
 
-  // Put SCK, MOSI, SS pins into output mode
-  // also put SCK, MOSI into LOW state, and SS into HIGH state.
-  // Then put SPI hardware into Master mode and turn SPI on
-  SPI.begin();
+  initLED();
 
-  // Slow down the master a bit
-  SPI.setClockDivider(SPI_CLOCK_DIV8);
+  enableWiFi();
 
-  pinMode(LED_BUILTIN, OUTPUT);
-  digitalWrite(LED_BUILTIN, LOW);
-
-  enable_WiFi();
-
-  connect_WiFi();
+  connectWiFi();
 
   server.begin();
-  // you're connected now, so print out the status:
+  
   printWifiStatus();
 
-  // turn on the LED once we've connected to the Wi-Fi
-  digitalWrite(LED_BUILTIN, HIGH);
-  connect_MQTT();
+  connectMQTT();
+
+  publishMessage(0, "started");
 }
 
 void loop() {
+  unsigned long currentMillis = millis();
+  
+  if (currentMillis - previousMillis >= interval) {
+    previousMillis = currentMillis;
+    publishMessage(0, "ping");
+  }
+
   // listen for incoming clients
   WiFiClient wifiClient = server.available();
   
   if (wifiClient) {
     if (WiFi.status() != WL_CONNECTED) {
-      connect_WiFi();
+      connectWiFi();
     }
   
     if (!mqttClient.connected()) {
       // MQTT client is disconnected, connect
-      connect_MQTT();
+      connectMQTT();
     }
     
     Serial.println("new client");
@@ -172,14 +160,47 @@ byte transferAndWait(const byte what)
   digitalWrite(SS, HIGH);
   delayMicroseconds(20);
   return a;
-} // end of transferAndWait
+}
 
 String getDirection(String requestString) {
   int getTag = requestString.indexOf("GET /");
   return requestString.substring(getTag+5);
 }
 
-void enable_WiFi() {
+void initSSL() {
+  if (!ECCX08.begin()) {
+    Serial.println("No ECCX08 present!");
+    while (1);
+  }
+
+  // Set a callback to get the current time
+  // used to validate the servers certificate
+  ArduinoBearSSL.onGetTime(getTime);
+
+  // Set the ECCX08 slot to use for the private key
+  // and the accompanying public certificate for it
+  sslClient.setEccSlot(0, certificate);
+}
+
+void initLED() {
+  pinMode(LED_BUILTIN, OUTPUT);
+  digitalWrite(LED_BUILTIN, LOW);
+}
+
+void initSPI() {
+  pinMode(SS, OUTPUT); 
+  digitalWrite(SS, HIGH);
+
+  // Put SCK, MOSI, SS pins into output mode
+  // also put SCK, MOSI into LOW state, and SS into HIGH state.
+  // Then put SPI hardware into Master mode and turn SPI on
+  SPI.begin();
+
+  // Slow down the master a bit
+  SPI.setClockDivider(SPI_CLOCK_DIV8);
+}
+
+void enableWiFi() {
   // check for the WiFi module:
   if (WiFi.status() == WL_NO_MODULE) {
     Serial.println("Communication with WiFi module failed!");
@@ -193,7 +214,7 @@ void enable_WiFi() {
   }
 }
 
-void connect_WiFi() {
+void connectWiFi() {
   // attempt to connect to WiFi network:
   Serial.print("Attempting to connect to SSID: ");
   Serial.println(ssid);
@@ -228,9 +249,12 @@ void printWifiStatus() {
 
   Serial.print("To see this page in action, open a browser to http://");
   Serial.println(ip);
+
+  // turn on the LED once we've connected to the Wi-Fi
+  digitalWrite(LED_BUILTIN, HIGH);
 }
 
-void connect_MQTT() {
+void connectMQTT() {
   Serial.print("Attempting to MQTT broker: ");
   Serial.print(broker);
   Serial.println(" ");
@@ -254,12 +278,14 @@ void publishMessage(byte msg, String dir) {
   Serial.println("Dir:");
   Serial.println(dir);
 
-  doc["distance_cm"] = msg;
+  doc["id"] = "bb#00001";
+  doc["obstacle_distance"] = msg;
+  doc["obstacle_distance_unit"] = "cm";
   doc["direction"] = dir;
   serializeJson(doc, jsonOutput);
   
   // send message, the Print interface can be used to set the message contents
-  mqttClient.beginMessage("arduino/15/outgoing");
+  mqttClient.beginMessage("arduino/01/outgoing");
   mqttClient.print(jsonOutput);
   mqttClient.endMessage();
 }
